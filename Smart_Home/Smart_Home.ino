@@ -12,6 +12,9 @@
 #define LD2410_RX_PIN   16
 #define LD2410_TX_PIN   17
 
+#define LED_PIN  18
+#define FAN_PIN  25
+
 #define LD2410_BAUDRATE 256000
 
 
@@ -72,7 +75,13 @@ void processLD2410();
 
 void enterDeepSleep();
 
-void printWakeupReason();
+void printWakeupReason(); 
+
+void releaseGPIOHold();
+
+void controlDevices();
+
+void prepareGPIOForSleep();
 
 
 // ======================================================
@@ -91,7 +100,10 @@ void setup()
     Serial.println("       PIR + LD2410C + FSM");
     Serial.println("================================");
 
+    pinMode(LED_PIN, OUTPUT);
+    pinMode(FAN_PIN, OUTPUT);
 
+    releaseGPIOHold();
     // --------------------------------------------------
     // PIR
     // --------------------------------------------------
@@ -362,9 +374,10 @@ void processFSM()
 void changeState(RoomState newState)
 {
     currentState = newState;
-
     stateStartTime = millis();
 
+    // Điều khiển thiết bị ngay khi đổi trạng thái
+    controlDevices();
 
     switch (newState)
     {
@@ -393,7 +406,6 @@ void changeState(RoomState newState)
             break;
     }
 }
-
 
 // ======================================================
 // ĐỌC LD2410
@@ -430,37 +442,27 @@ void enterDeepSleep()
 {
     int pirValue = digitalRead(PIR_PIN);
 
+    /*
+     * Không tắt LED/FAN.
+     * Giữ nguyên trạng thái hiện tại.
+     */
 
-    // --------------------------------------------------
-    // PIR đang HIGH
-    // -> ngủ
-    // -> đánh thức khi PIR LOW
-    // --------------------------------------------------
+    prepareGPIOForSleep();
 
     if (pirValue == HIGH)
     {
         Serial.println("[SLEEP] PIR = HIGH");
         Serial.println("[SLEEP] Wake-up level = LOW");
 
-
         esp_sleep_enable_ext0_wakeup(
             (gpio_num_t)PIR_PIN,
             0
         );
     }
-
-
-    // --------------------------------------------------
-    // PIR đang LOW
-    // -> ngủ
-    // -> đánh thức khi PIR HIGH
-    // --------------------------------------------------
-
     else
     {
         Serial.println("[SLEEP] PIR = LOW");
         Serial.println("[SLEEP] Wake-up level = HIGH");
-
 
         esp_sleep_enable_ext0_wakeup(
             (gpio_num_t)PIR_PIN,
@@ -468,14 +470,12 @@ void enterDeepSleep()
         );
     }
 
-
     Serial.println("[SLEEP] ESP32 -> DEEP SLEEP");
 
     Serial.flush();
 
     esp_deep_sleep_start();
 }
-
 
 // ======================================================
 // WAKE-UP REASON
@@ -503,4 +503,63 @@ void printWakeupReason()
 
             break;
     }
+}
+void controlDevices()
+{
+    switch (currentState)
+    {
+        case STATE_PIR_HIGH:
+            digitalWrite(LED_PIN, HIGH);
+            digitalWrite(FAN_PIN, HIGH);
+
+            Serial.println("[DEVICE] LED = ON");
+            Serial.println("[DEVICE] FAN = ON");
+            break;
+
+        case STATE_OCCUPIED:
+            digitalWrite(LED_PIN, HIGH);
+            digitalWrite(FAN_PIN, HIGH);
+
+            Serial.println("[DEVICE] LED = ON");
+            Serial.println("[DEVICE] FAN = ON");
+            break;
+
+        case STATE_NO_PRESENCE:
+            digitalWrite(LED_PIN, LOW);
+            digitalWrite(FAN_PIN, LOW);
+
+            Serial.println("[DEVICE] LED = OFF");
+            Serial.println("[DEVICE] FAN = OFF");
+            break;
+
+        case STATE_PIR_LOW:
+            // Chưa có kết luận cuối cùng
+            // Giữ nguyên trạng thái LED/FAN
+            break;
+
+        case STATE_SLEEP:
+            // CỰC KỲ QUAN TRỌNG:
+            // Không thay đổi LED/FAN
+            break;
+
+        case STATE_STARTUP:
+        default:
+            break;
+    }
+}
+void prepareGPIOForSleep()
+{
+    // Cho phép GPIO giữ nguyên mức hiện tại
+    gpio_hold_en((gpio_num_t)LED_PIN);
+    gpio_hold_en((gpio_num_t)FAN_PIN);
+
+    Serial.println("[SLEEP] LED GPIO HOLD");
+    Serial.println("[SLEEP] FAN GPIO HOLD");
+}
+void releaseGPIOHold()
+{
+    gpio_hold_dis((gpio_num_t)LED_PIN);
+    gpio_hold_dis((gpio_num_t)FAN_PIN);
+
+    Serial.println("[WAKEUP] GPIO HOLD released");
 }
